@@ -1,0 +1,64 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials') // Nom de vos credentials DockerHub dans Jenkins
+        SERVER_USER = 'your-server-username'
+        SERVER_IP = 'your-server-ip-address'
+        APP_NAME = 'react-app'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git 'https://github.com/votre-utilisateur/votre-projet.git'
+            }
+        }
+        stage('Build') {
+            steps {
+                sh 'npm install' // Installer les dépendances
+                sh 'npm run build' // Construire l'application React
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'npm test' // Exécuter les tests unitaires
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    def imageName = "${APP_NAME}:${env.BUILD_ID}"
+                    sh "docker build -t ${imageName} ."
+                    sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
+                    sh "docker tag ${imageName} ${DOCKERHUB_CREDENTIALS_USR}/${APP_NAME}:${env.BUILD_ID}"
+                    sh "docker push ${DOCKERHUB_CREDENTIALS_USR}/${APP_NAME}:${env.BUILD_ID}"
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                script {
+                    def imageName = "${DOCKERHUB_CREDENTIALS_USR}/${APP_NAME}:${env.BUILD_ID}"
+                    sh """
+                    ssh ${SERVER_USER}@${SERVER_IP} << EOF
+                    docker pull ${imageName}
+                    docker stop ${APP_NAME} || true
+                    docker rm ${APP_NAME} || true
+                    docker run -d --name ${APP_NAME} -p 80:80 ${imageName}
+                    EOF
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Build réussi !'
+        }
+        failure {
+            echo 'Build échoué - vérifiez les logs pour plus de détails.'
+        }
+    }
+}
